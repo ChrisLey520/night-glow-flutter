@@ -12,7 +12,12 @@ class ColorModel {
   });
 
   Color toColor() {
-    return HSVColor.fromAHSV(1.0, hue, saturation, brightness).toColor();
+    return HSVColor.fromAHSV(
+      1.0,
+      hue.clamp(0.0, 359.9),
+      saturation.clamp(0.0, 1.0),
+      brightness.clamp(0.0, 1.0),
+    ).toColor();
   }
 
   static ColorModel fromColor(Color color) {
@@ -38,9 +43,12 @@ class ColorModel {
     'brightness': brightness,
   };
 
-  factory ColorModel.fromJson(Map<String, dynamic> json) => ColorModel(
-    hue: (json['hue'] as num).toDouble(),
-    saturation: (json['saturation'] as num).toDouble(),
-    brightness: (json['brightness'] as num).toDouble(),
-  );
+  factory ColorModel.fromJson(Map<String, dynamic> json) {
+    // Fix: clamp values from persisted data to prevent HSVColor assert crashes
+    // if storage was corrupted or written by a different app version.
+    final hue = (json['hue'] as num).toDouble().clamp(0.0, 359.9);
+    final sat = (json['saturation'] as num).toDouble().clamp(0.0, 1.0);
+    final bri = (json['brightness'] as num).toDouble().clamp(0.0, 1.0);
+    return ColorModel(hue: hue, saturation: sat, brightness: bri);
+  }
 }

@@ -1,5 +1,33 @@
 import 'dart:math';
+import 'dart:ui';
 import 'package:flutter/material.dart';
+
+// Cache the static hue ring picture so it is drawn once and reused.
+// Only the indicator positions depend on hue/saturation and are drawn on top.
+Picture? _cachedRingPicture;
+Size? _cachedRingSize;
+
+Picture _buildRingPicture(Size size) {
+  final recorder = PictureRecorder();
+  final canvas = Canvas(recorder);
+  final center = Offset(size.width / 2, size.height / 2);
+  final radius = min(size.width, size.height) / 2;
+  final ringWidth = radius * 0.22;
+  final innerRadius = radius - ringWidth;
+  final arcRect = Rect.fromCircle(
+    center: center,
+    radius: innerRadius + ringWidth / 2,
+  );
+  // Reuse a single Paint object across all 360 arcs to avoid per-iteration allocs
+  final paint = Paint()
+    ..strokeWidth = ringWidth + 1
+    ..style = PaintingStyle.stroke;
+  for (int i = 0; i < 360; i++) {
+    paint.color = HSVColor.fromAHSV(1.0, i.toDouble(), 1.0, 1.0).toColor();
+    canvas.drawArc(arcRect, (i - 1) * pi / 180, 2 * pi / 180, false, paint);
+  }
+  return recorder.endRecording();
+}
 
 class ColorWheelPainter extends CustomPainter {
   final double hue;
@@ -11,29 +39,18 @@ class ColorWheelPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = min(size.width, size.height) / 2;
-
-    // Draw hue ring
     final ringWidth = radius * 0.22;
     final innerRadius = radius - ringWidth;
 
-    for (int i = 0; i < 360; i++) {
-      final startAngle = (i - 1) * pi / 180;
-      final sweepAngle = 2 * pi / 180;
-      final color = HSVColor.fromAHSV(1.0, i.toDouble(), 1.0, 1.0).toColor();
-      final paint = Paint()
-        ..color = color
-        ..strokeWidth = ringWidth + 1
-        ..style = PaintingStyle.stroke;
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: innerRadius + ringWidth / 2),
-        startAngle,
-        sweepAngle,
-        false,
-        paint,
-      );
+    // Fix: draw hue ring from cached Picture — rebuilt only when size changes
+    if (_cachedRingPicture == null || _cachedRingSize != size) {
+      _cachedRingPicture?.dispose();
+      _cachedRingPicture = _buildRingPicture(size);
+      _cachedRingSize = size;
     }
+    canvas.drawPicture(_cachedRingPicture!);
 
-    // Draw saturation disc (inside the ring)
+    // Draw saturation disc
     final discRadius = innerRadius - 4;
     final rect = Rect.fromCircle(center: center, radius: discRadius);
     final shader = RadialGradient(
@@ -42,10 +59,7 @@ class ColorWheelPainter extends CustomPainter {
         HSVColor.fromAHSV(1.0, hue, 1.0, 1.0).toColor(),
       ],
     ).createShader(rect);
-    final discPaint = Paint()..shader = shader;
-    canvas.drawCircle(center, discRadius, discPaint);
-
-    // Darken overlay for brightness-like feel (reserved for future use)
+    canvas.drawCircle(center, discRadius, Paint()..shader = shader);
 
     // Hue indicator on ring
     final hueAngle = (hue - 90) * pi / 180;
@@ -68,9 +82,8 @@ class ColorWheelPainter extends CustomPainter {
 
     // Saturation indicator inside disc
     final satX = center.dx + (saturation - 0.5) * 2 * discRadius * 0.7;
-    final satY = center.dy;
     canvas.drawCircle(
-      Offset(satX, satY),
+      Offset(satX, center.dy),
       10,
       Paint()
         ..color = Colors.white
@@ -78,10 +91,9 @@ class ColorWheelPainter extends CustomPainter {
         ..strokeWidth = 2.5,
     );
     canvas.drawCircle(
-      Offset(satX, satY),
+      Offset(satX, center.dy),
       8,
-      Paint()
-        ..color = HSVColor.fromAHSV(1.0, hue, saturation, 1.0).toColor(),
+      Paint()..color = HSVColor.fromAHSV(1.0, hue, saturation, 1.0).toColor(),
     );
   }
 

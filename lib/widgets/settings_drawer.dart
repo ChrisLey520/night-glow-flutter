@@ -324,9 +324,15 @@ class _SettingsDrawerState extends State<SettingsDrawer>
   }
 
   Widget _previewSection() {
+    // Fix: use screen dimensions so sliders cover the full usable area
+    final screen = MediaQuery.of(context).size;
+    final maxX = (screen.width - 80).clamp(80.0, 600.0);
+    final maxY = (screen.height - 80).clamp(80.0, 1000.0);
+    final maxW = screen.width.clamp(120.0, 600.0);
+    final maxH = (screen.height * 0.6).clamp(120.0, 800.0);
     return Column(
       children: [
-        _sliderRow('宽度', widget.previewW, 80, 240, (v) {
+        _sliderRow('宽度', widget.previewW, 80, maxW, (v) {
           widget.onPreviewLayoutChanged(
             widget.previewX,
             widget.previewY,
@@ -334,7 +340,7 @@ class _SettingsDrawerState extends State<SettingsDrawer>
             widget.previewH,
           );
         }),
-        _sliderRow('高度', widget.previewH, 80, 320, (v) {
+        _sliderRow('高度', widget.previewH, 80, maxH, (v) {
           widget.onPreviewLayoutChanged(
             widget.previewX,
             widget.previewY,
@@ -342,7 +348,7 @@ class _SettingsDrawerState extends State<SettingsDrawer>
             v,
           );
         }),
-        _sliderRow('水平位置', widget.previewX, 0, 300, (v) {
+        _sliderRow('水平位置', widget.previewX, 0, maxX, (v) {
           widget.onPreviewLayoutChanged(
             v,
             widget.previewY,
@@ -350,7 +356,7 @@ class _SettingsDrawerState extends State<SettingsDrawer>
             widget.previewH,
           );
         }),
-        _sliderRow('垂直位置', widget.previewY, 0, 600, (v) {
+        _sliderRow('垂直位置', widget.previewY, 0, maxY, (v) {
           widget.onPreviewLayoutChanged(
             widget.previewX,
             v,

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import '../models/membership_level.dart';
 import 'state_store.dart';
@@ -68,6 +69,17 @@ class MembershipManager {
       }
       if (details.pendingCompletePurchase) {
         await InAppPurchase.instance.completePurchase(details);
+      }
+    } else if (details.status == PurchaseStatus.error ||
+        details.status == PurchaseStatus.canceled) {
+      // Fix: Android requires completePurchase even for error/canceled states
+      // to prevent the transaction from hanging indefinitely in the pending queue.
+      if (details.pendingCompletePurchase) {
+        try {
+          await InAppPurchase.instance.completePurchase(details);
+        } catch (e) {
+          debugPrint('completePurchase on error/canceled failed: $e');
+        }
       }
     }
   }

@@ -139,17 +139,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _listenIAP() {
     _iapSubscription = InAppPurchase.instance.purchaseStream.listen(
       (purchases) async {
+        bool anyPurchased = false;
         for (final p in purchases) {
-          // Fix #8: wrap async call in try/catch so errors don't silently drop
           try {
             await _membership.applyPurchase(p);
+            if (p.status == PurchaseStatus.purchased ||
+                p.status == PurchaseStatus.restored) {
+              anyPurchased = true;
+            }
           } catch (e) {
             debugPrint('IAP applyPurchase error: $e');
           }
         }
-        if (mounted) setState(() {});
+        if (!mounted) return;
+        // Fix: close the modal only after the purchase is actually confirmed
+        // via the stream, not optimistically in the purchase() call.
+        if (anyPurchased && _showMembershipModal) {
+          setState(() => _showMembershipModal = false);
+        } else {
+          setState(() {});
+        }
       },
-      // Fix #8: handle stream errors to prevent unhandled zone error / app crash
       onError: (Object error) {
         debugPrint('IAP purchaseStream error: $error');
       },
@@ -243,16 +253,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             color: _fillColor,
           ),
 
-          // Camera preview window (draggable/resizable)
+          // Fix: RepaintBoundary isolates the camera preview texture from
+          // parent rebuilds (brightness slider, timer setState, etc.)
           if (_cameraReady)
-            PreviewWindow(
-              cameraController: _cameraCtrl,
-              initialX: _previewX,
-              initialY: _previewY,
-              initialW: _previewW,
-              initialH: _previewH,
-              mirrorMode: _mirrorCapture,
-              onLayoutChanged: _onPreviewLayout,
+            RepaintBoundary(
+              child: PreviewWindow(
+                cameraController: _cameraCtrl,
+                initialX: _previewX,
+                initialY: _previewY,
+                initialW: _previewW,
+                initialH: _previewH,
+                mirrorMode: _mirrorCapture,
+                onLayoutChanged: _onPreviewLayout,
+              ),
             ),
 
           // Bottom camera controls
@@ -338,9 +351,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 currentLevel: _membership.level,
                 membershipManager: _membership,
                 onClose: () => setState(() => _showMembershipModal = false),
-                onPurchased: () {
-                  setState(() => _showMembershipModal = false);
-                },
+                // onPurchased is intentionally omitted: modal is closed by
+                // _listenIAP only after purchaseStream confirms the purchase.
+                onPurchased: () {},
               ),
             ),
         ],

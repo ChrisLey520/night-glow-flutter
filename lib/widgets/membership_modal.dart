@@ -75,9 +75,12 @@ class _MembershipModalState extends State<MembershipModal>
     final product = _productFor(_selectedTab);
     if (product == null) return;
     setState(() => _purchasing = true);
-    final ok = await widget.membershipManager.purchase(product);
+    // Fix: purchase() returning true only means the IAP request was submitted.
+    // The actual result arrives via purchaseStream. We do NOT close the modal
+    // here — let the stream handler (HomePage._listenIAP) trigger onPurchased
+    // after real confirmation. We only clear the spinner.
+    await widget.membershipManager.purchase(product);
     if (mounted) setState(() => _purchasing = false);
-    if (ok) widget.onPurchased();
   }
 
   @override
@@ -139,7 +142,9 @@ class _MembershipModalState extends State<MembershipModal>
                     width: double.infinity,
                     height: 50,
                     child: ElevatedButton(
-                      onPressed: (_purchasing || !_productsLoaded) ? null : _purchase,
+                      onPressed: (_purchasing || !_productsLoaded || _isAlreadyOwned(_selectedTab))
+                          ? null
+                          : _purchase,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.amber[700],
                         foregroundColor: Colors.black,
@@ -185,11 +190,18 @@ class _MembershipModalState extends State<MembershipModal>
     );
   }
 
+  bool _isAlreadyOwned(int tabIndex) {
+    // Fix: disable purchasing a tier the user already owns or has exceeded
+    final targetLevel = tabIndex == 0 ? MembershipLevel.vip : MembershipLevel.svip;
+    return widget.currentLevel.value >= targetLevel.value;
+  }
+
   Widget _tab(int index, String title, String price) {
     final active = _selectedTab == index;
+    final owned = _isAlreadyOwned(index);
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _selectedTab = index),
+        onTap: owned ? null : () => setState(() => _selectedTab = index),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 12),
@@ -199,24 +211,34 @@ class _MembershipModalState extends State<MembershipModal>
               color: active ? Colors.amber : Colors.white24,
               width: active ? 2 : 1,
             ),
-            color: active
-                ? Colors.amber.withValues(alpha: 0.12)
-                : Colors.white.withValues(alpha: 0.04),
+            color: owned
+                ? Colors.white.withValues(alpha: 0.02)
+                : active
+                    ? Colors.amber.withValues(alpha: 0.12)
+                    : Colors.white.withValues(alpha: 0.04),
           ),
           child: Column(
             children: [
               Text(
-                title,
+                owned ? '$title ✓' : title,
                 style: TextStyle(
-                  color: active ? Colors.amber : Colors.white70,
+                  color: owned
+                      ? Colors.white38
+                      : active
+                          ? Colors.amber
+                          : Colors.white70,
                   fontWeight: FontWeight.bold,
                   fontSize: 18,
                 ),
               ),
               Text(
-                price,
+                owned ? '已拥有' : price,
                 style: TextStyle(
-                  color: active ? Colors.amber[300] : Colors.white38,
+                  color: owned
+                      ? Colors.white24
+                      : active
+                          ? Colors.amber[300]
+                          : Colors.white38,
                   fontSize: 13,
                 ),
               ),

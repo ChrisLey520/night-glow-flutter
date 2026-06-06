@@ -182,19 +182,21 @@ class _PreviewWindowState extends State<PreviewWindow> {
     setState(() {
       switch (_activeHandle) {
         case _ResizeHandle.topLeft:
-          _x = _startX! + dx;
-          _y = _startY! + dy;
+          // Fix: when _w is clamped, sync _x so the right edge stays anchored
           _w = (_startW! - dx).clamp(_minW, double.infinity);
+          _x = _startX! + (_startW! - _w);
           _h = (_startH! - dy).clamp(_minH, double.infinity);
+          _y = _startY! + (_startH! - _h);
           break;
         case _ResizeHandle.topRight:
-          _y = _startY! + dy;
           _w = (_startW! + dx).clamp(_minW, double.infinity);
           _h = (_startH! - dy).clamp(_minH, double.infinity);
+          _y = _startY! + (_startH! - _h);
           break;
         case _ResizeHandle.bottomLeft:
-          _x = _startX! + dx;
+          // Fix: same right-edge anchor for left-side handle
           _w = (_startW! - dx).clamp(_minW, double.infinity);
+          _x = _startX! + (_startW! - _w);
           _h = (_startH! + dy).clamp(_minH, double.infinity);
           break;
         case _ResizeHandle.bottomRight:

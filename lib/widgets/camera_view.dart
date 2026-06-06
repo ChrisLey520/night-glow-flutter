@@ -74,12 +74,16 @@ class _CameraViewState extends State<CameraView> {
     if (ctrl == null || !ctrl.value.isInitialized) return;
     try {
       await ctrl.startVideoRecording();
-      if (!mounted) return;
+      // Fix: if widget was disposed after startVideoRecording() succeeded,
+      // we must still stop the recording so it doesn't run silently forever.
+      if (!mounted) {
+        try { await ctrl.stopVideoRecording(); } catch (_) {}
+        return;
+      }
       setState(() {
         _isRecording = true;
         _recordSeconds = 0;
       });
-      // Fix #7: cancel existing timer before creating a new one
       _timer?.cancel();
       _timer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (mounted) setState(() => _recordSeconds++);
@@ -334,7 +338,8 @@ class _CameraViewState extends State<CameraView> {
   Widget _modeTab(String label, CaptureMode mode) {
     final active = _mode == mode;
     return GestureDetector(
-      onTap: () => setState(() => _mode = mode),
+      // Fix: disallow mode switch while recording to prevent unrecoverable state
+      onTap: _isRecording ? null : () => setState(() => _mode = mode),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
