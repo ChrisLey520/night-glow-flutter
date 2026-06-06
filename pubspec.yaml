@@ -1,0 +1,48 @@
+name: night_glow
+description: "夜光 - 自拍补光灯，支持多彩预设和实时相机预览"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Camera
+  camera: ^0.11.1
+  image_picker: ^1.1.2
+
+  # Permissions
+  permission_handler: ^12.0.0+1
+
+  # Screen brightness & wakelock
+  screen_brightness: ^2.1.9
+  wakelock_plus: ^1.2.10
+
+  # Storage
+  shared_preferences: ^2.3.5
+  path_provider: ^2.1.5
+
+  # Gallery save
+  gal: ^2.3.0
+
+  # In-App Purchase
+  in_app_purchase: ^3.2.1
+
+  # Video recording
+  video_player: ^2.9.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
