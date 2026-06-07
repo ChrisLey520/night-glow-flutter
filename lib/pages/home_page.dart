@@ -72,19 +72,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _init() async {
+    // SharedPreferences 读取很快，先完成再渲染 UI
     await _store.init();
     _membership = MembershipManager(_store);
-    // Fix #6: subscribe to purchaseStream BEFORE calling init() which triggers
-    // restorePurchases(), so restored purchases are not missed on broadcast stream
     _listenIAP();
-    await _membership.init();
-
     _loadSavedState();
-    await _requestPermissions();
-    await _initCamera();
+
+    // 第一次 setState：UI 立即显示填充光颜色，不等相机和网络
+    if (mounted) setState(() {});
+
+    // IAP 恢复（网络请求）与权限申请+相机初始化并行执行
+    await Future.wait([
+      _membership.init(),
+      _requestPermissions().then((_) => _initCamera()),
+    ]);
+
     await BrightnessManager.setFullBrightness();
     await BrightnessManager.setBrightness(_screenBrightness);
 
+    // 第二次 setState：相机就绪，显示预览窗口
     if (mounted) setState(() {});
   }
 
