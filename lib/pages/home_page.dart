@@ -2,8 +2,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
+import 'package:gal/gal.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'album_page.dart';
 
 import '../models/color_model.dart';
 import '../models/preset_data.dart';
@@ -37,19 +39,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int _selectedIndex = 0;
   ColorModel _customColor = const ColorModel(hue: 0, saturation: 1.0, brightness: 1.0);
 
-  // Preview window
-  double _previewX = 16;
-  double _previewY = 80;
-  double _previewW = 120;
-  double _previewH = 160;
+  // Preview window — default 16:9 (h = w × 16/9); x/y = -1 means "center on first build"
+  double _previewX = -1;
+  double _previewY = -1;
+  double _previewW = 160;
+  double _previewH = 285;
 
   // Settings
   bool _mirrorCapture = false;
+  bool _motionPhoto = false;
 
   // UI state
   bool _showControlPanel = false;
-  bool _showSettings = false;
   bool _showMembershipModal = false;
+  bool _showTestDrawer = false;
+  String _lastPhotoPath = '';
+
+  // Video state
+  bool _isVideoMode = false;
+  bool _isRecording = false;
 
   // IAP stream
   StreamSubscription<List<PurchaseDetails>>? _iapSubscription;
@@ -130,6 +138,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
       await _cameraCtrl!.initialize();
+      // Disable flash to prevent the white-screen shutter animation on iOS
+      await _cameraCtrl!.setFlashMode(FlashMode.off);
       if (mounted) setState(() => _cameraReady = true);
     } catch (e) {
       debugPrint('Camera init error: $e');
@@ -229,17 +239,69 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _store.saveMirrorCapture(value);
   }
 
+  double get _fillSaturation {
+    final preset = kPresets[_selectedIndex];
+    if (preset.isCustom) return _customColor.saturation;
+    return preset.color.saturation;
+  }
+
   void _showMembership() {
     setState(() {
       _showMembershipModal = true;
       _showControlPanel = false;
-      _showSettings = false;
+      _showTestDrawer = false;
     });
+  }
+
+  Future<void> _openAlbum() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const AlbumPage()),
+    );
+  }
+
+  Future<void> _toggleVideoMode() async {
+    if (_isRecording) return;
+    setState(() => _isVideoMode = !_isVideoMode);
+  }
+
+  Future<void> _startRecording() async {
+    final ctrl = _cameraCtrl;
+    if (ctrl == null || !ctrl.value.isInitialized) return;
+    try {
+      await ctrl.prepareForVideoRecording();
+      await ctrl.startVideoRecording();
+      if (mounted) setState(() => _isRecording = true);
+    } catch (e) {
+      debugPrint('startRecording error: $e');
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    final ctrl = _cameraCtrl;
+    if (ctrl == null) return;
+    try {
+      final file = await ctrl.stopVideoRecording();
+      if (mounted) {
+        setState(() {
+          _isRecording = false;
+          _lastPhotoPath = file.path;
+        });
+      }
+      await Gal.putVideo(file.path);
+    } catch (e) {
+      debugPrint('stopRecording error: $e');
+      if (mounted) setState(() => _isRecording = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
+    // First launch (no saved position): center the preview window
+    if (_previewX < 0) {
+      _previewX = (size.width - _previewW) / 2;
+      _previewY = (size.height - _previewH) / 2;
+    }
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -253,94 +315,112 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             color: _fillColor,
           ),
 
-          // Fix: RepaintBoundary isolates the camera preview texture from
-          // parent rebuilds (brightness slider, timer setState, etc.)
-          if (_cameraReady)
-            RepaintBoundary(
-              child: PreviewWindow(
-                cameraController: _cameraCtrl,
-                initialX: _previewX,
-                initialY: _previewY,
-                initialW: _previewW,
-                initialH: _previewH,
-                mirrorMode: _mirrorCapture,
-                onLayoutChanged: _onPreviewLayout,
-              ),
-            ),
+          // PreviewWindow is a direct child of Stack so its internal Positioned
+          // correctly receives StackParentData. IgnorePointer lives inside.
+          PreviewWindow(
+            cameraController: _cameraReady ? _cameraCtrl : null,
+            initialX: _previewX,
+            initialY: _previewY,
+            initialW: _previewW,
+            initialH: _previewH,
+            mirrorMode: _mirrorCapture,
+            ignoring: _showControlPanel || _showTestDrawer || _showMembershipModal,
+            onLayoutChanged: _onPreviewLayout,
+          ),
 
           // Bottom camera controls
           Positioned(
             left: 0,
             right: 0,
             bottom: 0,
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [
-                    Colors.black.withValues(alpha: 0.7),
-                    Colors.transparent,
-                  ],
-                  stops: const [0, 0.8],
-                ),
+            child: SafeArea(
+              top: false,
+              child: CameraView(
+                cameraController: _cameraCtrl,
+                mirrorCapture: _mirrorCapture,
+                fillSaturation: _fillSaturation,
+                motionPhoto: _motionPhoto,
+                isVideoMode: _isVideoMode,
+                isRecording: _isRecording,
+                lastPhotoPath: _lastPhotoPath,
+                onToggleControlPanel: () {
+                  setState(() => _showControlPanel = !_showControlPanel);
+                },
+                onOpenAlbum: _openAlbum,
+                onMotionPhotoChange: (v) => setState(() => _motionPhoto = v),
+                onToggleMode: _toggleVideoMode,
+                onStartVideo: _startRecording,
+                onStopVideo: _stopRecording,
               ),
-              child: SafeArea(
-                top: false,
-                child: CameraView(
-                  cameraController: _cameraCtrl,
-                  mirrorCapture: _mirrorCapture,
-                  onToggleControlPanel: () {
-                    setState(() {
-                      _showControlPanel = !_showControlPanel;
-                      if (_showControlPanel) _showSettings = false;
-                    });
-                  },
-                  onToggleSettings: () {
-                    setState(() {
-                      _showSettings = !_showSettings;
-                      if (_showSettings) _showControlPanel = false;
-                    });
-                  },
+            ),
+          ),
+
+          // Settings button — SafeArea ensures it sits below the status bar /
+          // notch / Dynamic Island on all devices.
+          SafeArea(
+            bottom: false,
+            left: false,
+            child: Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 16, top: 58),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() {
+                    _showTestDrawer = true;
+                    _showControlPanel = false;
+                  }),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.black.withValues(alpha: 0.28),
+                    ),
+                    child: const Icon(
+                      Icons.settings_outlined,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
 
-          // Control panel (slides up from bottom)
+          // Control panel (slides up from bottom) with outside-tap barrier
           if (_showControlPanel)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: _AnimatedSlideUp(
-                child: ControlPanel(
-                  selectedIndex: _selectedIndex,
-                  customColor: _customColor,
-                  screenBrightness: _screenBrightness,
-                  memberLevel: _membership.level,
-                  onPresetSelected: _onPresetSelected,
-                  onColorChanged: _onColorChanged,
-                  onBrightnessChanged: _onBrightnessChanged,
-                  onMembershipRequired: _showMembership,
-                ),
-              ),
-            ),
-
-          // Settings drawer (slides from right)
-          if (_showSettings)
             Positioned.fill(
-              child: SettingsDrawer(
-                memberLevel: _membership.level,
-                mirrorCapture: _mirrorCapture,
-                previewX: _previewX,
-                previewY: _previewY,
-                previewW: _previewW,
-                previewH: _previewH,
-                onClose: () => setState(() => _showSettings = false),
-                onMirrorChanged: _onMirrorChanged,
-                onPreviewLayoutChanged: _onPreviewLayout,
-                onMembershipUpgrade: _showMembership,
+              child: Stack(
+                children: [
+                  // Transparent barrier — tapping outside the panel closes it
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        debugPrint('CONTROL BARRIER onTap → closing');
+                        setState(() => _showControlPanel = false);
+                      },
+                    ),
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: _AnimatedSlideUp(
+                      child: ControlPanel(
+                        selectedIndex: _selectedIndex,
+                        customColor: _customColor,
+                        screenBrightness: _screenBrightness,
+                        memberLevel: _membership.level,
+                        onPresetSelected: _onPresetSelected,
+                        onColorChanged: _onColorChanged,
+                        onBrightnessChanged: _onBrightnessChanged,
+                        onMembershipRequired: _showMembership,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
 
@@ -354,6 +434,41 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 // onPurchased is intentionally omitted: modal is closed by
                 // _listenIAP only after purchaseStream confirms the purchase.
                 onPurchased: () {},
+              ),
+            ),
+
+          // Settings drawer — triggered by the bug-icon button in CameraView.
+          // Uses the same barrier+slide pattern as the control panel.
+          if (_showTestDrawer)
+            Positioned.fill(
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => setState(() => _showTestDrawer = false),
+                    ),
+                  ),
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                    child: _AnimatedSlideRight(
+                      child: SettingsDrawer(
+                        memberLevel: _membership.level,
+                        mirrorCapture: _mirrorCapture,
+                        previewX: _previewX,
+                        previewY: _previewY,
+                        previewW: _previewW,
+                        previewH: _previewH,
+                        onClose: () => setState(() => _showTestDrawer = false),
+                        onMirrorChanged: _onMirrorChanged,
+                        onPreviewLayoutChanged: _onPreviewLayout,
+                        onMembershipUpgrade: _showMembership,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
         ],
@@ -384,6 +499,45 @@ class _AnimatedSlideUpState extends State<_AnimatedSlideUp>
     );
     _anim = Tween<Offset>(
       begin: const Offset(0, 1),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SlideTransition(position: _anim, child: widget.child);
+  }
+}
+
+class _AnimatedSlideRight extends StatefulWidget {
+  final Widget child;
+  const _AnimatedSlideRight({required this.child});
+
+  @override
+  State<_AnimatedSlideRight> createState() => _AnimatedSlideRightState();
+}
+
+class _AnimatedSlideRightState extends State<_AnimatedSlideRight>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<Offset> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    );
+    _anim = Tween<Offset>(
+      begin: const Offset(1, 0),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
     _ctrl.forward();

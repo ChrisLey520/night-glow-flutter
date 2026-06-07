@@ -21,7 +21,7 @@ const List<PresetItem> kPresets = [
   PresetItem(
     id: 0,
     name: '柔白光',
-    color: ColorModel(hue: 40, saturation: 0.08, brightness: 1.0),
+    color: ColorModel(hue: 40, saturation: 0.02, brightness: 1.0),
     requiredLevel: MembershipLevel.normal,
   ),
   PresetItem(
