@@ -28,7 +28,10 @@ class _MembershipModalState extends State<MembershipModal>
   int _selectedTab = 0;
   List<ProductDetails> _products = [];
   bool _productsLoaded = false;
+  bool _loadError = false;
   bool _purchasing = false;
+  bool _restoring = false;
+
   @override
   void initState() {
     super.initState();
@@ -41,13 +44,21 @@ class _MembershipModalState extends State<MembershipModal>
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
     _ctrl.forward();
+    if (widget.currentLevel == MembershipLevel.vip) {
+      _selectedTab = 1;
+    }
     _loadProducts();
   }
 
   Future<void> _loadProducts() async {
-    setState(() => _productsLoaded = false);
+    setState(() { _productsLoaded = false; _loadError = false; });
     final products = await widget.membershipManager.loadProducts();
-    if (mounted) setState(() { _products = products; _productsLoaded = true; });
+    if (!mounted) return;
+    setState(() {
+      _products = products;
+      _productsLoaded = true;
+      _loadError = products.isEmpty;
+    });
   }
 
   @override
@@ -75,12 +86,14 @@ class _MembershipModalState extends State<MembershipModal>
     final product = _productFor(_selectedTab);
     if (product == null) return;
     setState(() => _purchasing = true);
-    // Fix: purchase() returning true only means the IAP request was submitted.
-    // The actual result arrives via purchaseStream. We do NOT close the modal
-    // here — let the stream handler (HomePage._listenIAP) trigger onPurchased
-    // after real confirmation. We only clear the spinner.
     await widget.membershipManager.purchase(product);
     if (mounted) setState(() => _purchasing = false);
+  }
+
+  Future<void> _restore() async {
+    setState(() => _restoring = true);
+    await widget.membershipManager.restorePurchases();
+    if (mounted) setState(() => _restoring = false);
   }
 
   @override
@@ -102,7 +115,7 @@ class _MembershipModalState extends State<MembershipModal>
                 color: Color(0xFF1A1A1A),
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               ),
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -126,13 +139,16 @@ class _MembershipModalState extends State<MembershipModal>
                   ),
                   const SizedBox(height: 16),
                   // Tab selector
-                  Row(
-                    children: [
-                      _tab(0, 'VIP', '¥1/年'),
-                      const SizedBox(width: 12),
-                      _tab(1, 'SVIP', '¥2/年'),
-                    ],
-                  ),
+                  if (widget.currentLevel == MembershipLevel.normal)
+                    Row(
+                      children: [
+                        _tab(0, 'VIP'),
+                        const SizedBox(width: 12),
+                        _tab(1, 'SVIP'),
+                      ],
+                    ),
+                  if (widget.currentLevel == MembershipLevel.vip)
+                    Row(children: [_tab(1, 'SVIP')]),
                   const SizedBox(height: 16),
                   // Benefits
                   _benefits(),
@@ -142,45 +158,58 @@ class _MembershipModalState extends State<MembershipModal>
                     width: double.infinity,
                     height: 50,
                     child: ElevatedButton(
-                      onPressed: (_purchasing || !_productsLoaded || _isAlreadyOwned(_selectedTab))
-                          ? null
-                          : _purchase,
+                      onPressed: _buildOnPressed(),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.amber[700],
-                        foregroundColor: Colors.black,
+                        backgroundColor: _loadError
+                            ? Colors.white12
+                            : _selectedTab == 0
+                                ? const Color(0xFFFFD700)
+                                : const Color(0xFFFF8C00),
+                        foregroundColor:
+                            _loadError ? Colors.white70 : Colors.black,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        disabledBackgroundColor: Colors.amber[900],
+                        disabledBackgroundColor: Colors.white24,
                       ),
-                      child: _purchasing
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.black54,
-                              ),
-                            )
-                          : Text(
-                              _selectedTab == 0
-                                  ? '订阅 VIP - ¥1/年'
-                                  : '订阅 SVIP - ¥2/年',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
+                      child: _buildPurchaseButtonChild(),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: _close,
-                    child: const Text(
-                      '暂不升级',
-                      style: TextStyle(color: Colors.white38, fontSize: 13),
-                    ),
+                  const SizedBox(height: 12),
+                  // Apple required: subscription terms
+                  _subscriptionTerms(),
+                  const SizedBox(height: 4),
+                  // Restore & close row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton(
+                        onPressed: (_restoring || _purchasing) ? null : _restore,
+                        child: _restoring
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white38,
+                                ),
+                              )
+                            : const Text(
+                                '恢复购买',
+                                style: TextStyle(
+                                    color: Colors.white38, fontSize: 13),
+                              ),
+                      ),
+                      TextButton(
+                        onPressed: _close,
+                        child: const Text(
+                          '暂不升级',
+                          style: TextStyle(color: Colors.white38, fontSize: 13),
+                        ),
+                      ),
+                    ],
                   ),
+                  SafeArea(top: false, child: const SizedBox(height: 8)),
                 ],
               ),
             ),
@@ -190,15 +219,62 @@ class _MembershipModalState extends State<MembershipModal>
     );
   }
 
-  bool _isAlreadyOwned(int tabIndex) {
-    // Fix: disable purchasing a tier the user already owns or has exceeded
-    final targetLevel = tabIndex == 0 ? MembershipLevel.vip : MembershipLevel.svip;
-    return widget.currentLevel.value >= targetLevel.value;
+  VoidCallback? _buildOnPressed() {
+    if (_purchasing || _restoring) return null;
+    if (_loadError) return _loadProducts;
+    if (!_productsLoaded) return null;
+    if (_isAlreadyOwned(_selectedTab)) return null;
+    return _purchase;
   }
 
-  Widget _tab(int index, String title, String price) {
+  Widget _buildPurchaseButtonChild() {
+    if (_purchasing) {
+      return const SizedBox(
+        width: 22,
+        height: 22,
+        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black54),
+      );
+    }
+    if (!_productsLoaded) {
+      return const SizedBox(
+        width: 18,
+        height: 18,
+        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
+      );
+    }
+    if (_loadError) {
+      return const Text('加载失败，点击重试',
+          style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+              color: Colors.white70));
+    }
+    final product = _productFor(_selectedTab);
+    final label = _selectedTab == 0 ? 'VIP' : 'SVIP';
+    final price = product?.price ?? (_selectedTab == 0 ? 'VIP' : 'SVIP');
+    return Text(
+      '订阅 $label · $price/年',
+      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+    );
+  }
+
+  bool _isAlreadyOwned(int tabIndex) {
+    final target =
+        tabIndex == 0 ? MembershipLevel.vip : MembershipLevel.svip;
+    return widget.currentLevel.value >= target.value;
+  }
+
+  Widget _tab(int index, String title) {
     final active = _selectedTab == index;
     final owned = _isAlreadyOwned(index);
+    final product = _productFor(index);
+    final priceStr = product?.price ??
+        (index == 0
+            ? kLevelPrices[MembershipLevel.vip.value]
+            : kLevelPrices[MembershipLevel.svip.value]);
+    final levelColor = index == 0
+        ? const Color(0xFFFFD700)
+        : const Color(0xFFFF8C00);
     return Expanded(
       child: GestureDetector(
         onTap: owned ? null : () => setState(() => _selectedTab = index),
@@ -208,13 +284,13 @@ class _MembershipModalState extends State<MembershipModal>
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: active ? Colors.amber : Colors.white24,
+              color: active ? levelColor : Colors.white24,
               width: active ? 2 : 1,
             ),
             color: owned
                 ? Colors.white.withValues(alpha: 0.02)
                 : active
-                    ? Colors.amber.withValues(alpha: 0.12)
+                    ? levelColor.withValues(alpha: 0.12)
                     : Colors.white.withValues(alpha: 0.04),
           ),
           child: Column(
@@ -225,19 +301,19 @@ class _MembershipModalState extends State<MembershipModal>
                   color: owned
                       ? Colors.white38
                       : active
-                          ? Colors.amber
+                          ? levelColor
                           : Colors.white70,
                   fontWeight: FontWeight.bold,
                   fontSize: 18,
                 ),
               ),
               Text(
-                owned ? '已拥有' : price,
+                owned ? '已拥有' : '$priceStr/年',
                 style: TextStyle(
                   color: owned
                       ? Colors.white24
                       : active
-                          ? Colors.amber[300]
+                          ? levelColor.withValues(alpha: 0.8)
                           : Colors.white38,
                   fontSize: 13,
                 ),
@@ -250,17 +326,9 @@ class _MembershipModalState extends State<MembershipModal>
   }
 
   Widget _benefits() {
-    final vipBenefits = [
-      '✓ 全部9种预设色彩',
-      '✓ 无广告体验',
-      '✗ 自定义色轮（SVIP专属）',
-    ];
-    final svipBenefits = [
-      '✓ 全部9种预设色彩',
-      '✓ 无广告体验',
-      '✓ 360° 自定义色轮',
-    ];
-    final items = _selectedTab == 0 ? vipBenefits : svipBenefits;
+    final items = _selectedTab == 0
+        ? kLevelBenefits[MembershipLevel.vip.value]
+        : kLevelBenefits[MembershipLevel.svip.value];
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -268,29 +336,38 @@ class _MembershipModalState extends State<MembershipModal>
         color: Colors.white.withValues(alpha: 0.05),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: items.map((b) {
-          final positive = b.startsWith('✓');
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 3),
             child: Row(
               children: [
-                Icon(
-                  positive ? Icons.check_circle_outline : Icons.cancel_outlined,
-                  color: positive ? Colors.greenAccent : Colors.white24,
-                  size: 16,
-                ),
+                const Icon(Icons.check_circle_outline,
+                    color: Colors.greenAccent, size: 16),
                 const SizedBox(width: 8),
-                Text(
-                  b.substring(2),
-                  style: TextStyle(
-                    color: positive ? Colors.white : Colors.white38,
-                    fontSize: 14,
-                  ),
-                ),
+                Text(b,
+                    style: const TextStyle(color: Colors.white, fontSize: 14)),
               ],
             ),
           );
         }).toList(),
+      ),
+    );
+  }
+
+  // Apple requires this disclosure for auto-renewable subscriptions.
+  Widget _subscriptionTerms() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Text(
+        '订阅将在到期前 24 小时内自动续费并从 Apple 账户扣款。'
+        '可在 iPhone 设置 → Apple ID → 订阅 中管理或取消。',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.3),
+          fontSize: 11,
+          height: 1.5,
+        ),
       ),
     );
   }

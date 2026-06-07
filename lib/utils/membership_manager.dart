@@ -25,6 +25,9 @@ class MembershipManager {
     } catch (_) {}
   }
 
+  // Called by the "恢复购买" button in MembershipModal.
+  Future<void> restorePurchases() async => _restoreFromStore();
+
   Future<List<ProductDetails>> loadProducts() async {
     try {
       final available = await InAppPurchase.instance.isAvailable();
