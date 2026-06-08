@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-import 'package:in_app_purchase/in_app_purchase.dart';
 import '../models/membership_level.dart';
 import '../repositories/purchase/purchase_repository.dart';
 import 'state_store.dart';
@@ -27,13 +25,13 @@ class MembershipManager {
     } catch (_) {}
   }
 
-  Future<void> restorePurchases() async => _restoreFromStore();
+  Future<void> restorePurchases() => _restoreFromStore();
 
   Future<List<PurchaseProduct>> loadProducts() async {
     try {
       final available = await _repo.isAvailable();
       if (!available) return [];
-      return await _repo.loadProducts({
+      return _repo.loadProducts({
         MembershipProducts.vipProductId,
         MembershipProducts.svipProductId,
       });
@@ -48,13 +46,13 @@ class MembershipManager {
     } catch (_) {}
   }
 
-  Future<void> applyPurchase(PurchaseDetails details) async {
-    if (details.status == PurchaseStatus.purchased ||
-        details.status == PurchaseStatus.restored) {
+  Future<void> applyPurchase(StorePurchaseUpdate update) async {
+    if (update.status == StorePurchaseStatus.purchased ||
+        update.status == StorePurchaseStatus.restored) {
       MembershipLevel newLevel;
-      if (details.productID == MembershipProducts.svipProductId) {
+      if (update.productId == MembershipProducts.svipProductId) {
         newLevel = MembershipLevel.svip;
-      } else if (details.productID == MembershipProducts.vipProductId) {
+      } else if (update.productId == MembershipProducts.vipProductId) {
         newLevel = MembershipLevel.vip;
       } else {
         return;
@@ -63,13 +61,15 @@ class MembershipManager {
         _level = newLevel;
         await _store.saveMembershipLevel(newLevel);
       }
-      await _repo.completePurchase(details);
-    } else if (details.status == PurchaseStatus.error ||
-        details.status == PurchaseStatus.canceled) {
-      try {
-        await _repo.completePurchase(details);
-      } catch (e) {
-        debugPrint('completePurchase on error/canceled failed: $e');
+      if (update.needsFinish) {
+        await _repo.completePurchase(update);
+      }
+    } else if (update.status == StorePurchaseStatus.error ||
+        update.status == StorePurchaseStatus.cancelled) {
+      if (update.needsFinish) {
+        try {
+          await _repo.completePurchase(update);
+        } catch (_) {}
       }
     }
   }

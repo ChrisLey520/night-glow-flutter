@@ -6,7 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:camera/camera.dart';
 import 'package:gal/gal.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:in_app_purchase/in_app_purchase.dart';
+import '../repositories/purchase/purchase_repository.dart';
 import 'album_page.dart';
 
 import '../models/color_model.dart';
@@ -75,7 +75,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _isRecording = false;
 
   // IAP stream
-  StreamSubscription<List<PurchaseDetails>>? _iapSubscription;
+  StreamSubscription<List<StorePurchaseUpdate>>? _iapSubscription;
 
   @override
   void initState() {
@@ -188,8 +188,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         for (final p in purchases) {
           try {
             await _membership.applyPurchase(p);
-            if (p.status == PurchaseStatus.purchased ||
-                p.status == PurchaseStatus.restored) {
+            if (p.status == StorePurchaseStatus.purchased ||
+                p.status == StorePurchaseStatus.restored) {
               anyPurchased = true;
             }
           } catch (e) {

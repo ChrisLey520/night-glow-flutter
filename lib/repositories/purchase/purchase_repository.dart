@@ -1,50 +1,58 @@
-import 'package:in_app_purchase/in_app_purchase.dart';
+/// Platform-agnostic purchase models — no dependency on any store SDK.
 
-/// Platform-agnostic product info shown in the UI.
+enum StorePurchaseStatus { pending, purchased, restored, cancelled, error }
+
+/// Unified purchase event produced by every store implementation.
+class StorePurchaseUpdate {
+  final String productId;
+  final StorePurchaseStatus status;
+  /// Whether the implementation needs [PurchaseRepository.completePurchase]
+  /// to be called to close the transaction on the store side.
+  final bool needsFinish;
+
+  const StorePurchaseUpdate({
+    required this.productId,
+    required this.status,
+    this.needsFinish = false,
+  });
+}
+
+/// Product info shown in the UI — no raw SDK type exposed.
 class PurchaseProduct {
   final String id;
   final String title;
   final String price;
-  final ProductDetails raw;
 
   const PurchaseProduct({
     required this.id,
     required this.title,
     required this.price,
-    required this.raw,
   });
 }
 
-/// Result of a purchase stream event after the repository processes it.
-enum PurchaseOutcome { purchased, restored, cancelled, error, pending }
-
-class PurchaseResult {
-  final PurchaseOutcome outcome;
-  final String productId;
-
-  const PurchaseResult({required this.outcome, required this.productId});
-}
-
-/// Abstract interface — UI and MembershipManager depend only on this.
+/// Abstract interface — all store implementations must satisfy this contract.
+/// MembershipManager and UI depend only on this; they never touch SDK types.
 abstract class PurchaseRepository {
-  /// Subscribe to raw purchase events. Call this once on app start.
-  Stream<List<PurchaseDetails>> get purchaseStream;
+  /// Stream of purchase events. Subscribe once on app start.
+  Stream<List<StorePurchaseUpdate>> get purchaseStream;
 
-  /// Whether the store is reachable.
+  /// Whether the store billing service is reachable on this device.
   Future<bool> isAvailable();
 
-  /// Fetch product details for [ids].
+  /// Fetch localised product info for [ids].
   Future<List<PurchaseProduct>> loadProducts(Set<String> ids);
 
-  /// Initiate a purchase. Result comes via [purchaseStream].
+  /// Initiate a purchase flow. The result arrives via [purchaseStream].
   Future<void> buyProduct(PurchaseProduct product);
 
-  /// Restore previous purchases. Results come via [purchaseStream].
+  /// Restore previously completed purchases (App Store / Google Play).
+  /// Chinese stores usually don't need this — no-op is fine.
   Future<void> restorePurchases();
 
-  /// Must be called for every PurchaseDetails to close the transaction.
-  Future<void> completePurchase(PurchaseDetails details);
+  /// Acknowledge / finish the transaction so the store closes it.
+  /// Only call when [StorePurchaseUpdate.needsFinish] is true.
+  Future<void> completePurchase(StorePurchaseUpdate update);
 
-  /// Subscription terms text shown in the payment UI.
+  /// Store-specific subscription terms shown below the buy button.
   String get subscriptionTermsText;
 }
