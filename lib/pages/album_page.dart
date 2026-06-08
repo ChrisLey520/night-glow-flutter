@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:video_player/video_player.dart';
 
-/// Full-screen gallery browser: grid → tap → viewer (image or video).
 class AlbumPage extends StatefulWidget {
   const AlbumPage({super.key});
 
@@ -16,30 +15,33 @@ class _AlbumPageState extends State<AlbumPage> {
   bool _loading = true;
   bool _denied = false;
 
-  // Multi-select state
   bool _multiSelect = false;
   final Set<String> _selectedIds = {};
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _load(initial: true);
   }
 
-  Future<void> _load() async {
-    final permission = await PhotoManager.requestPermissionExtend();
-    if (!permission.isAuth) {
-      if (mounted) setState(() { _loading = false; _denied = true; });
-      return;
+  Future<void> _load({bool initial = false}) async {
+    if (initial) {
+      final permission = await PhotoManager.requestPermissionExtend();
+      if (!permission.isAuth) {
+        if (mounted) setState(() { _loading = false; _denied = true; });
+        return;
+      }
     }
+
     final albums = await PhotoManager.getAssetPathList(
       type: RequestType.common,
       filterOption: FilterOptionGroup(orders: [
         const OrderOption(type: OrderOptionType.createDate, asc: false),
       ]),
     );
+    if (!mounted) return;
     if (albums.isEmpty) {
-      if (mounted) setState(() => _loading = false);
+      setState(() { _assets = []; _loading = false; });
       return;
     }
     final assets = await albums.first.getAssetListRange(start: 0, end: 300);
@@ -71,26 +73,22 @@ class _AlbumPageState extends State<AlbumPage> {
   }
 
   Future<void> _deleteSelected() async {
-    final count = _selectedIds.length;
-    final confirmed = await _showDeleteConfirm(
-      context,
-      '$count 张照片/视频将被移入废纸篓，此操作不可撤销。',
-    );
-    if (confirmed != true || !mounted) return;
-
     final ids = _selectedIds.toList();
-    await PhotoManager.editor.deleteWithIds(ids);
-    if (!mounted) return;
+    // deleteWithIds shows the iOS system confirmation internally;
+    // it returns the IDs that were actually deleted (empty if cancelled).
+    final deleted = await PhotoManager.editor.deleteWithIds(ids);
+    if (!mounted || deleted.isEmpty) return;
     setState(() {
-      _assets.removeWhere((a) => ids.contains(a.id));
       _multiSelect = false;
       _selectedIds.clear();
     });
+    await _load();
   }
 
-  Future<void> _onViewerDeleted(String id) async {
-    if (!mounted) return;
-    setState(() => _assets.removeWhere((a) => a.id == id));
+  Future<void> _onViewerDeleted() async {
+    // Reload from photo_manager so the list reflects reality,
+    // avoiding stale thumbnails caused by local-array filtering.
+    await _load();
   }
 
   @override
@@ -159,8 +157,8 @@ class _AlbumPageState extends State<AlbumPage> {
     }
     if (_assets.isEmpty) {
       return const Center(
-        child:
-            Text('相册为空', style: TextStyle(color: Colors.white54, fontSize: 15)),
+        child: Text('相册为空',
+            style: TextStyle(color: Colors.white54, fontSize: 15)),
       );
     }
     return GridView.builder(
@@ -180,8 +178,7 @@ class _AlbumPageState extends State<AlbumPage> {
             _toggleSelect(_assets[i].id);
             return;
           }
-          Navigator.of(context)
-              .push<String>(
+          Navigator.of(context).push(
             PageRouteBuilder(
               opaque: false,
               barrierColor: Colors.black,
@@ -202,35 +199,6 @@ class _AlbumPageState extends State<AlbumPage> {
       ),
     );
   }
-}
-
-// ── Confirmation helper ───────────────────────────────────────────────────────
-
-Future<bool?> _showDeleteConfirm(BuildContext context, String message) {
-  return showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      backgroundColor: const Color(0xFF1E1E1E),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: const Text('确认删除',
-          style: TextStyle(color: Colors.white, fontSize: 17)),
-      content:
-          Text(message, style: const TextStyle(color: Colors.white70)),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, false),
-          child:
-              const Text('取消', style: TextStyle(color: Colors.white38)),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('删除',
-              style: TextStyle(
-                  color: Colors.redAccent, fontWeight: FontWeight.bold)),
-        ),
-      ],
-    ),
-  );
 }
 
 // ── Thumbnail ─────────────────────────────────────────────────────────────────
@@ -289,7 +257,6 @@ class _ThumbnailState extends State<_Thumbnail> {
                 child: Icon(Icons.play_circle_fill,
                     color: Colors.white70, size: 20),
               ),
-            // Multi-select overlay
             if (widget.multiSelect)
               Positioned.fill(
                 child: Container(
@@ -313,8 +280,7 @@ class _ThumbnailState extends State<_Thumbnail> {
                     border: Border.all(color: Colors.white, width: 1.5),
                   ),
                   child: widget.selected
-                      ? const Icon(Icons.check,
-                          color: Colors.white, size: 14)
+                      ? const Icon(Icons.check, color: Colors.white, size: 14)
                       : null,
                 ),
               ),
@@ -325,11 +291,11 @@ class _ThumbnailState extends State<_Thumbnail> {
   }
 }
 
-// ── Media viewer (image + video) ─────────────────────────────────────────────
+// ── Media viewer ──────────────────────────────────────────────────────────────
 
 class _MediaViewerPage extends StatefulWidget {
   final AssetEntity asset;
-  final Future<void> Function(String id) onDeleted;
+  final Future<void> Function() onDeleted;
 
   const _MediaViewerPage({
     required this.asset,
@@ -370,27 +336,24 @@ class _MediaViewerPageState extends State<_MediaViewerPage> {
     if (file == null || !mounted) return;
     final ctrl = VideoPlayerController.file(file);
     await ctrl.initialize();
-    if (!mounted) {
-      ctrl.dispose();
-      return;
-    }
+    if (!mounted) { ctrl.dispose(); return; }
     setState(() { _videoCtrl = ctrl; _videoReady = true; });
     ctrl.setLooping(true);
     ctrl.play();
   }
 
-  Future<void> _confirmDelete() async {
-    final typeName = _isVideo ? '视频' : '照片';
-    final confirmed = await _showDeleteConfirm(
-      context,
-      '该$typeName将被移入废纸篓，此操作不可撤销。',
-    );
-    if (confirmed != true || !mounted) return;
-
+  Future<void> _delete() async {
     setState(() => _deleting = true);
-    await PhotoManager.editor.deleteWithIds([widget.asset.id]);
+    // deleteWithIds shows the iOS system confirmation internally.
+    // Returns the IDs that were actually deleted; empty means cancelled.
+    final deleted =
+        await PhotoManager.editor.deleteWithIds([widget.asset.id]);
     if (!mounted) return;
-    await widget.onDeleted(widget.asset.id);
+    if (deleted.isEmpty) {
+      setState(() => _deleting = false);
+      return;
+    }
+    await widget.onDeleted();
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -407,7 +370,6 @@ class _MediaViewerPageState extends State<_MediaViewerPage> {
       body: Stack(
         children: [
           Center(child: _buildContent()),
-          // Back button
           Positioned(
             top: MediaQuery.of(context).padding.top + 8,
             left: 12,
@@ -416,7 +378,6 @@ class _MediaViewerPageState extends State<_MediaViewerPage> {
               icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
             ),
           ),
-          // Delete button
           Positioned(
             top: MediaQuery.of(context).padding.top + 8,
             right: 12,
@@ -427,12 +388,11 @@ class _MediaViewerPageState extends State<_MediaViewerPage> {
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: Colors.white54))
                 : IconButton(
-                    onPressed: _confirmDelete,
+                    onPressed: _delete,
                     icon: const Icon(Icons.delete_outline,
                         color: Colors.redAccent, size: 26),
                   ),
           ),
-          // Play/pause for video
           if (_isVideo && _videoReady)
             Positioned(
               bottom: MediaQuery.of(context).padding.bottom + 24,
