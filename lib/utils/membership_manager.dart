@@ -1,15 +1,18 @@
 import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import '../models/membership_level.dart';
+import '../repositories/purchase/purchase_repository.dart';
 import 'state_store.dart';
 
 class MembershipManager {
   final StateStore _store;
+  final PurchaseRepository _repo;
   MembershipLevel _level = MembershipLevel.normal;
 
-  MembershipManager(this._store);
+  MembershipManager(this._store, this._repo);
 
   MembershipLevel get level => _level;
+  PurchaseRepository get repo => _repo;
 
   Future<void> init() async {
     _level = _store.membershipLevel;
@@ -18,41 +21,31 @@ class MembershipManager {
 
   Future<void> _restoreFromStore() async {
     try {
-      final available = await InAppPurchase.instance.isAvailable();
+      final available = await _repo.isAvailable();
       if (!available) return;
-      await InAppPurchase.instance.restorePurchases();
-      // purchases are handled via purchaseStream — see HomePage
+      await _repo.restorePurchases();
     } catch (_) {}
   }
 
-  // Called by the "恢复购买" button in MembershipModal.
   Future<void> restorePurchases() async => _restoreFromStore();
 
-  Future<List<ProductDetails>> loadProducts() async {
+  Future<List<PurchaseProduct>> loadProducts() async {
     try {
-      final available = await InAppPurchase.instance.isAvailable();
+      final available = await _repo.isAvailable();
       if (!available) return [];
-
-      final ids = {
+      return await _repo.loadProducts({
         MembershipProducts.vipProductId,
         MembershipProducts.svipProductId,
-      };
-      final response = await InAppPurchase.instance.queryProductDetails(ids);
-      return response.productDetails;
+      });
     } catch (_) {
       return [];
     }
   }
 
-  Future<bool> purchase(ProductDetails product) async {
+  Future<void> purchase(PurchaseProduct product) async {
     try {
-      final param = PurchaseParam(productDetails: product);
-      return await InAppPurchase.instance.buyNonConsumable(
-        purchaseParam: param,
-      );
-    } catch (_) {
-      return false;
-    }
+      await _repo.buyProduct(product);
+    } catch (_) {}
   }
 
   Future<void> applyPurchase(PurchaseDetails details) async {
@@ -70,23 +63,14 @@ class MembershipManager {
         _level = newLevel;
         await _store.saveMembershipLevel(newLevel);
       }
-      if (details.pendingCompletePurchase) {
-        await InAppPurchase.instance.completePurchase(details);
-      }
+      await _repo.completePurchase(details);
     } else if (details.status == PurchaseStatus.error ||
         details.status == PurchaseStatus.canceled) {
-      // Fix: Android requires completePurchase even for error/canceled states
-      // to prevent the transaction from hanging indefinitely in the pending queue.
-      if (details.pendingCompletePurchase) {
-        try {
-          await InAppPurchase.instance.completePurchase(details);
-        } catch (e) {
-          debugPrint('completePurchase on error/canceled failed: $e');
-        }
+      try {
+        await _repo.completePurchase(details);
+      } catch (e) {
+        debugPrint('completePurchase on error/canceled failed: $e');
       }
     }
   }
-  // Fix #10: removed canAccessPreset() dead code — access gating is handled
-  // exclusively by ControlPanel using preset.requiredLevel from the data model,
-  // which is the single source of truth and avoids logic divergence.
 }

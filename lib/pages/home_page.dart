@@ -16,6 +16,7 @@ import '../repositories/custom_preset_repository.dart';
 import '../repositories/local_custom_preset_repository.dart';
 import '../utils/state_store.dart';
 import '../utils/brightness_manager.dart';
+import '../repositories/purchase/purchase_repository_factory.dart';
 import '../utils/membership_manager.dart';
 import '../widgets/camera_view.dart';
 import '../widgets/control_panel.dart';
@@ -87,7 +88,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _init() async {
     await _store.init();
-    _membership = MembershipManager(_store);
+    _membership = MembershipManager(_store, PurchaseRepositoryFactory.create());
     _listenIAP();
     _loadSavedState();
 
@@ -181,7 +182,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _listenIAP() {
-    _iapSubscription = InAppPurchase.instance.purchaseStream.listen(
+    _iapSubscription = _membership.repo.purchaseStream.listen(
       (purchases) async {
         bool anyPurchased = false;
         for (final p in purchases) {

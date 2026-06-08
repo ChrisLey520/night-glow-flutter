@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:in_app_purchase/in_app_purchase.dart';
 import '../models/membership_level.dart';
+import '../repositories/purchase/purchase_repository.dart';
 import '../utils/membership_manager.dart';
 
 class MembershipModal extends StatefulWidget {
@@ -26,7 +26,7 @@ class _MembershipModalState extends State<MembershipModal>
   late AnimationController _ctrl;
   late Animation<Offset> _slideAnim;
   int _selectedTab = 0;
-  List<ProductDetails> _products = [];
+  List<PurchaseProduct> _products = [];
   bool _productsLoaded = false;
   bool _loadError = false;
   bool _purchasing = false;
@@ -71,7 +71,7 @@ class _MembershipModalState extends State<MembershipModal>
     _ctrl.reverse().then((_) => widget.onClose());
   }
 
-  ProductDetails? _productFor(int tabIndex) {
+  PurchaseProduct? _productFor(int tabIndex) {
     final id = tabIndex == 0
         ? MembershipProducts.vipProductId
         : MembershipProducts.svipProductId;
@@ -355,13 +355,11 @@ class _MembershipModalState extends State<MembershipModal>
     );
   }
 
-  // Apple requires this disclosure for auto-renewable subscriptions.
   Widget _subscriptionTerms() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Text(
-        '订阅将在到期前 24 小时内自动续费并从 Apple 账户扣款。'
-        '可在 iPhone 设置 → Apple ID → 订阅 中管理或取消。',
+        widget.membershipManager.repo.subscriptionTermsText,
         textAlign: TextAlign.center,
         style: TextStyle(
           color: Colors.white.withValues(alpha: 0.3),
