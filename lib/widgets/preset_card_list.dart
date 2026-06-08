@@ -12,9 +12,11 @@ class PresetCardList extends StatefulWidget {
   final String? selectedCustomPresetId;
   final List<CustomImagePreset> customPresets;
   final CustomPresetRepository repository;
+  final bool isAdding;
   final ValueChanged<int> onSelected;
   final ValueChanged<CustomImagePreset> onCustomSelected;
   final ValueChanged<List<CustomImagePreset>> onCustomPresetsChanged;
+  final ValueChanged<XFile> onAddImage;
 
   const PresetCardList({
     super.key,
@@ -23,9 +25,11 @@ class PresetCardList extends StatefulWidget {
     required this.selectedCustomPresetId,
     required this.customPresets,
     required this.repository,
+    required this.isAdding,
     required this.onSelected,
     required this.onCustomSelected,
     required this.onCustomPresetsChanged,
+    required this.onAddImage,
   });
 
   @override
@@ -34,7 +38,6 @@ class PresetCardList extends StatefulWidget {
 
 class _PresetCardListState extends State<PresetCardList> {
   bool _editMode = false;
-  bool _adding = false;
 
   // Card width fixed at 68, spacing 8; LayoutBuilder computes columns.
   static const double _cardW = 68;
@@ -48,97 +51,14 @@ class _PresetCardListState extends State<PresetCardList> {
   // ── Add flow ──────────────────────────────────────────────────────────────
 
   Future<void> _startAdd() async {
-    if (_adding) return;
+    if (widget.isAdding) return;
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: ImageSource.gallery);
     if (picked == null || !mounted) return;
-
-    // Ask user to confirm and name the new preset
-    final name = await _showAddDialog(File(picked.path));
-    if (name == null || !mounted) return;
-
-    setState(() => _adding = true);
-    try {
-      final preset = await widget.repository.add(
-        name: name,
-        sourceFile: File(picked.path),
-      );
-      final updated = [...widget.customPresets, preset];
-      widget.onCustomPresetsChanged(updated);
-      widget.onCustomSelected(preset);
-    } finally {
-      if (mounted) setState(() => _adding = false);
-    }
-  }
-
-  Future<String?> _showAddDialog(File previewFile) async {
-    final controller = TextEditingController();
-    String? error;
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('添加自定义背景',
-              style: TextStyle(color: Colors.white, fontSize: 17)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Image.file(previewFile,
-                    height: 140, width: double.infinity, fit: BoxFit.cover),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: '输入名称',
-                  hintStyle: const TextStyle(color: Colors.white38),
-                  errorText: error,
-                  filled: true,
-                  fillColor: Colors.white10,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('取消',
-                  style: TextStyle(color: Colors.white38)),
-            ),
-            TextButton(
-              onPressed: () {
-                final name = controller.text.trim();
-                if (name.isEmpty) {
-                  setDialogState(() => error = '名称不能为空');
-                  return;
-                }
-                final exists = widget.customPresets
-                    .any((p) => p.name == name);
-                if (exists) {
-                  setDialogState(() => error = '名称已存在');
-                  return;
-                }
-                Navigator.pop(ctx, name);
-              },
-              child: const Text('确定',
-                  style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-      ),
-    );
+    // Delegate dialog + save to HomePage so it runs from the root context,
+    // avoiding the iOS issue where showDialog from a nested widget context
+    // renders only the modal barrier with no dialog content.
+    widget.onAddImage(picked);
   }
 
   // ── Remove flow ────────────────────────────────────────────────────────────
@@ -326,7 +246,7 @@ class _PresetCardListState extends State<PresetCardList> {
         child: CustomPaint(
           painter: _DashedBorderPainter(),
           child: Center(
-            child: _adding
+            child: widget.isAdding
                 ? const SizedBox(
                     width: 22,
                     height: 22,
@@ -440,7 +360,7 @@ class _DashedBorderPainter extends CustomPainter {
     final metric = path.computeMetrics().first;
     double dist = 0;
     while (dist < metric.length) {
-      final end = (dist + dash).clamp(0, metric.length);
+      final end = (dist + dash).clamp(0.0, metric.length);
       canvas.drawPath(metric.extractPath(dist, end), paint);
       dist += dash + gap;
     }

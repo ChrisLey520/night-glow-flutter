@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../models/color_model.dart';
 import '../models/preset_data.dart';
 import '../models/membership_level.dart';
@@ -19,8 +20,10 @@ class ControlPanel extends StatefulWidget {
   final ValueChanged<ColorModel> onColorChanged;
   final ValueChanged<double> onBrightnessChanged;
   final VoidCallback onMembershipRequired;
+  final bool isAddingPreset;
   final ValueChanged<CustomImagePreset> onCustomSelected;
   final ValueChanged<List<CustomImagePreset>> onCustomPresetsChanged;
+  final ValueChanged<XFile> onAddImage;
 
   const ControlPanel({
     super.key,
@@ -31,12 +34,14 @@ class ControlPanel extends StatefulWidget {
     required this.selectedCustomPresetId,
     required this.customPresets,
     required this.repository,
+    required this.isAddingPreset,
     required this.onPresetSelected,
     required this.onColorChanged,
     required this.onBrightnessChanged,
     required this.onMembershipRequired,
     required this.onCustomSelected,
     required this.onCustomPresetsChanged,
+    required this.onAddImage,
   });
 
   @override
@@ -128,9 +133,11 @@ class _ControlPanelState extends State<ControlPanel>
             selectedCustomPresetId: widget.selectedCustomPresetId,
             customPresets: widget.customPresets,
             repository: widget.repository,
+            isAdding: widget.isAddingPreset,
             onSelected: _handlePresetSelected,
             onCustomSelected: widget.onCustomSelected,
             onCustomPresetsChanged: widget.onCustomPresetsChanged,
+            onAddImage: widget.onAddImage,
           ),
           SizeTransition(
             sizeFactor: _slideAnim,

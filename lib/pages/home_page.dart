@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:camera/camera.dart';
 import 'package:gal/gal.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -62,6 +63,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _showControlPanel = false;
   bool _showMembershipModal = false;
   bool _showTestDrawer = false;
+  bool _addingPreset = false;
+  XFile? _pendingImage;
+  String _pendingImageName = '';
+  String? _pendingImageNameError;
   String _lastPhotoPath = '';
 
   // Video state
@@ -259,6 +264,49 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _store.saveSelectedCustomPresetId(null);
         _updateFillColor();
       }
+    });
+  }
+
+  void _onAddImage(XFile image) {
+    setState(() {
+      _pendingImage = image;
+      _pendingImageName = '';
+      _pendingImageNameError = null;
+    });
+  }
+
+  Future<void> _confirmPendingImage() async {
+    final image = _pendingImage;
+    if (image == null) return;
+    final name = _pendingImageName.trim();
+    if (name.isEmpty) {
+      setState(() => _pendingImageNameError = '名称不能为空');
+      return;
+    }
+    if (_customPresets.any((p) => p.name == name)) {
+      setState(() => _pendingImageNameError = '名称已存在');
+      return;
+    }
+    setState(() { _pendingImage = null; _addingPreset = true; });
+    try {
+      final preset = await _customRepo.add(
+        name: name,
+        sourceFile: File(image.path),
+      );
+      if (!mounted) return;
+      final updated = [..._customPresets, preset];
+      _onCustomPresetsChanged(updated);
+      _onCustomPresetSelected(preset);
+    } finally {
+      if (mounted) setState(() => _addingPreset = false);
+    }
+  }
+
+  void _cancelPendingImage() {
+    setState(() {
+      _pendingImage = null;
+      _pendingImageName = '';
+      _pendingImageNameError = null;
     });
   }
 
@@ -487,12 +535,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         selectedCustomPresetId: _selectedCustomPresetId,
                         customPresets: _customPresets,
                         repository: _customRepo,
+                        isAddingPreset: _addingPreset,
                         onPresetSelected: _onPresetSelected,
                         onColorChanged: _onColorChanged,
                         onBrightnessChanged: _onBrightnessChanged,
                         onMembershipRequired: _showMembership,
                         onCustomSelected: _onCustomPresetSelected,
                         onCustomPresetsChanged: _onCustomPresetsChanged,
+                        onAddImage: _onAddImage,
                       ),
                     ),
                   ),
@@ -547,7 +597,130 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 ],
               ),
             ),
+
+          // Inline naming UI — rendered directly in the Stack so it never
+          // depends on Navigator/showDialog and works regardless of iOS timing.
+          if (_pendingImage != null)
+            Positioned.fill(
+              child: _AddPresetSheet(
+                imageFile: File(_pendingImage!.path),
+                name: _pendingImageName,
+                nameError: _pendingImageNameError,
+                onNameChanged: (v) => setState(() {
+                  _pendingImageName = v;
+                  _pendingImageNameError = null;
+                }),
+                onConfirm: _confirmPendingImage,
+                onCancel: _cancelPendingImage,
+              ),
+            ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Inline add-preset sheet (no Navigator/showDialog) ────────────────────────
+
+class _AddPresetSheet extends StatelessWidget {
+  final File imageFile;
+  final String name;
+  final String? nameError;
+  final ValueChanged<String> onNameChanged;
+  final VoidCallback onConfirm;
+  final VoidCallback onCancel;
+
+  const _AddPresetSheet({
+    required this.imageFile,
+    required this.name,
+    required this.nameError,
+    required this.onNameChanged,
+    required this.onConfirm,
+    required this.onCancel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onCancel,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        color: Colors.black54,
+        child: Center(
+          child: GestureDetector(
+            onTap: () {}, // absorb taps inside the card
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 32),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E1E1E),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('添加自定义背景',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 14),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.file(
+                      imageFile,
+                      height: 140,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        height: 140,
+                        color: const Color(0xFF2A2A2A),
+                        child: const Icon(Icons.broken_image,
+                            color: Colors.white38, size: 40),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    onChanged: onNameChanged,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: '输入名称',
+                      hintStyle: const TextStyle(color: Colors.white38),
+                      errorText: nameError,
+                      filled: true,
+                      fillColor: Colors.white10,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: onCancel,
+                        child: const Text('取消',
+                            style: TextStyle(color: Colors.white38)),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: onConfirm,
+                        child: const Text('确定',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
