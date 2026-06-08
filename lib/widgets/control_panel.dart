@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/color_model.dart';
 import '../models/preset_data.dart';
 import '../models/membership_level.dart';
+import '../models/custom_image_preset.dart';
+import '../repositories/custom_preset_repository.dart';
 import 'preset_card_list.dart';
 import 'color_wheel.dart';
 
@@ -10,10 +12,15 @@ class ControlPanel extends StatefulWidget {
   final ColorModel customColor;
   final double screenBrightness;
   final MembershipLevel memberLevel;
+  final String? selectedCustomPresetId;
+  final List<CustomImagePreset> customPresets;
+  final CustomPresetRepository repository;
   final ValueChanged<int> onPresetSelected;
   final ValueChanged<ColorModel> onColorChanged;
   final ValueChanged<double> onBrightnessChanged;
   final VoidCallback onMembershipRequired;
+  final ValueChanged<CustomImagePreset> onCustomSelected;
+  final ValueChanged<List<CustomImagePreset>> onCustomPresetsChanged;
 
   const ControlPanel({
     super.key,
@@ -21,10 +28,15 @@ class ControlPanel extends StatefulWidget {
     required this.customColor,
     required this.screenBrightness,
     required this.memberLevel,
+    required this.selectedCustomPresetId,
+    required this.customPresets,
+    required this.repository,
     required this.onPresetSelected,
     required this.onColorChanged,
     required this.onBrightnessChanged,
     required this.onMembershipRequired,
+    required this.onCustomSelected,
+    required this.onCustomPresetsChanged,
   });
 
   @override
@@ -47,6 +59,10 @@ class _ControlPanelState extends State<ControlPanel>
       parent: _animController,
       curve: Curves.easeOutCubic,
     );
+    if (widget.selectedIndex < kPresets.length &&
+        kPresets[widget.selectedIndex].isCustom) {
+      _animController.value = 1.0;
+    }
   }
 
   @override
@@ -73,9 +89,12 @@ class _ControlPanelState extends State<ControlPanel>
   @override
   void didUpdateWidget(ControlPanel old) {
     super.didUpdateWidget(old);
-    final preset = kPresets[widget.selectedIndex];
-    if (widget.selectedIndex != old.selectedIndex) {
-      if (preset.isCustom) {
+    if (widget.selectedIndex != old.selectedIndex ||
+        widget.selectedCustomPresetId != old.selectedCustomPresetId) {
+      final isBuiltInCustom = widget.selectedCustomPresetId == null &&
+          widget.selectedIndex < kPresets.length &&
+          kPresets[widget.selectedIndex].isCustom;
+      if (isBuiltInCustom) {
         _animController.forward();
       } else {
         _animController.reverse();
@@ -94,7 +113,6 @@ class _ControlPanelState extends State<ControlPanel>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Handle bar
           Container(
             margin: const EdgeInsets.only(top: 8, bottom: 4),
             width: 36,
@@ -104,15 +122,16 @@ class _ControlPanelState extends State<ControlPanel>
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-
-          // Preset cards
           PresetCardList(
             selectedIndex: widget.selectedIndex,
             memberLevel: widget.memberLevel,
+            selectedCustomPresetId: widget.selectedCustomPresetId,
+            customPresets: widget.customPresets,
+            repository: widget.repository,
             onSelected: _handlePresetSelected,
+            onCustomSelected: widget.onCustomSelected,
+            onCustomPresetsChanged: widget.onCustomPresetsChanged,
           ),
-
-          // Color wheel (animated)
           SizeTransition(
             sizeFactor: _slideAnim,
             child: Padding(
@@ -122,27 +141,20 @@ class _ControlPanelState extends State<ControlPanel>
                 child: ColorWheel(
                   hue: widget.customColor.hue,
                   saturation: widget.customColor.saturation,
-                  onHueChanged: (h) {
-                    widget.onColorChanged(
-                      widget.customColor.copyWith(hue: h),
-                    );
-                  },
-                  onSaturationChanged: (s) {
-                    widget.onColorChanged(
-                      widget.customColor.copyWith(saturation: s),
-                    );
-                  },
+                  onHueChanged: (h) =>
+                      widget.onColorChanged(widget.customColor.copyWith(hue: h)),
+                  onSaturationChanged: (s) => widget
+                      .onColorChanged(widget.customColor.copyWith(saturation: s)),
                 ),
               ),
             ),
           ),
-
-          // Brightness slider
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
             child: Row(
               children: [
-                const Icon(Icons.brightness_low, color: Colors.white54, size: 18),
+                const Icon(Icons.brightness_low,
+                    color: Colors.white54, size: 18),
                 Expanded(
                   child: SliderTheme(
                     data: SliderTheme.of(context).copyWith(
@@ -163,7 +175,8 @@ class _ControlPanelState extends State<ControlPanel>
                     ),
                   ),
                 ),
-                const Icon(Icons.brightness_high, color: Colors.white, size: 18),
+                const Icon(Icons.brightness_high,
+                    color: Colors.white, size: 18),
               ],
             ),
           ),

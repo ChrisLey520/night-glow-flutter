@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
@@ -9,6 +10,9 @@ import 'album_page.dart';
 
 import '../models/color_model.dart';
 import '../models/preset_data.dart';
+import '../models/custom_image_preset.dart';
+import '../repositories/custom_preset_repository.dart';
+import '../repositories/local_custom_preset_repository.dart';
 import '../utils/state_store.dart';
 import '../utils/brightness_manager.dart';
 import '../utils/membership_manager.dart';
@@ -27,6 +31,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final StateStore _store = StateStore();
+  final CustomPresetRepository _customRepo = LocalCustomPresetRepository();
   late MembershipManager _membership;
 
   CameraController? _cameraCtrl;
@@ -38,6 +43,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   double _screenBrightness = 1.0;
   int _selectedIndex = 0;
   ColorModel _customColor = const ColorModel(hue: 0, saturation: 1.0, brightness: 1.0);
+
+  // Custom image presets
+  List<CustomImagePreset> _customPresets = [];
+  String? _selectedCustomPresetId;
 
   // Preview window — default 16:9 (h = w × 16/9); x/y = -1 means "center on first build"
   double _previewX = -1;
@@ -72,25 +81,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _init() async {
-    // SharedPreferences 读取很快，先完成再渲染 UI
     await _store.init();
     _membership = MembershipManager(_store);
     _listenIAP();
     _loadSavedState();
 
-    // 第一次 setState：UI 立即显示填充光颜色，不等相机和网络
     if (mounted) setState(() {});
 
-    // IAP 恢复（网络请求）与权限申请+相机初始化并行执行
     await Future.wait([
       _membership.init(),
       _requestPermissions().then((_) => _initCamera()),
+      _customRepo.loadAll().then((list) {
+        _customPresets = list;
+        final savedId = _store.selectedCustomPresetId;
+        if (savedId != null &&
+            list.any((p) => p.id == savedId)) {
+          _selectedCustomPresetId = savedId;
+          _updateFillColorFromCustom(
+              list.firstWhere((p) => p.id == savedId));
+        }
+      }),
     ]);
 
     await BrightnessManager.setFullBrightness();
     await BrightnessManager.setBrightness(_screenBrightness);
 
-    // 第二次 setState：相机就绪，显示预览窗口
     if (mounted) setState(() {});
   }
 
@@ -111,12 +126,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _updateFillColor() {
+    // Custom image preset takes priority over built-in presets
+    if (_selectedCustomPresetId != null) return;
     final preset = kPresets[_selectedIndex];
     if (preset.isCustom) {
       _fillColor = _customColor.toColor();
     } else {
       _fillColor = preset.color.toColor();
     }
+  }
+
+  void _updateFillColorFromCustom(CustomImagePreset preset) {
+    // Image fill is handled in build() via _selectedCustomPresetId;
+    // set _fillColor to transparent so the image layer shows through.
+    _fillColor = Colors.transparent;
   }
 
   Future<void> _requestPermissions() async {
@@ -208,12 +231,35 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _onPresetSelected(int index) {
     setState(() {
       _selectedIndex = index;
+      _selectedCustomPresetId = null;
       _updateFillColor();
     });
     _store.saveSelectedIndex(index);
+    _store.saveSelectedCustomPresetId(null);
     if (kPresets[index].isCustom) {
       _store.saveColor(_customColor);
     }
+  }
+
+  void _onCustomPresetSelected(CustomImagePreset preset) {
+    setState(() {
+      _selectedCustomPresetId = preset.id;
+      _updateFillColorFromCustom(preset);
+    });
+    _store.saveSelectedCustomPresetId(preset.id);
+  }
+
+  void _onCustomPresetsChanged(List<CustomImagePreset> presets) {
+    setState(() {
+      _customPresets = presets;
+      // If the selected preset was removed, fall back to first built-in
+      if (_selectedCustomPresetId != null &&
+          !presets.any((p) => p.id == _selectedCustomPresetId)) {
+        _selectedCustomPresetId = null;
+        _store.saveSelectedCustomPresetId(null);
+        _updateFillColor();
+      }
+    });
   }
 
   void _onColorChanged(ColorModel color) {
@@ -318,8 +364,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             duration: const Duration(milliseconds: 300),
             width: size.width,
             height: size.height,
-            color: _fillColor,
+            color: _selectedCustomPresetId != null
+                ? Colors.transparent
+                : _fillColor,
           ),
+
+          // Custom image background (replaces solid color when active)
+          if (_selectedCustomPresetId != null)
+            Builder(builder: (_) {
+              final preset = _customPresets
+                  .where((p) => p.id == _selectedCustomPresetId)
+                  .firstOrNull;
+              if (preset == null) return const SizedBox.shrink();
+              return Positioned.fill(
+                child: Image.file(
+                  File(preset.localPath),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      Container(color: Colors.black),
+                ),
+              );
+            }),
 
           // PreviewWindow is a direct child of Stack so its internal Positioned
           // correctly receives StackParentData. IgnorePointer lives inside.
@@ -419,10 +484,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         customColor: _customColor,
                         screenBrightness: _screenBrightness,
                         memberLevel: _membership.level,
+                        selectedCustomPresetId: _selectedCustomPresetId,
+                        customPresets: _customPresets,
+                        repository: _customRepo,
                         onPresetSelected: _onPresetSelected,
                         onColorChanged: _onColorChanged,
                         onBrightnessChanged: _onBrightnessChanged,
                         onMembershipRequired: _showMembership,
+                        onCustomSelected: _onCustomPresetSelected,
+                        onCustomPresetsChanged: _onCustomPresetsChanged,
                       ),
                     ),
                   ),

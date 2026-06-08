@@ -14,6 +14,7 @@ class StateStore {
   static const _keyScreenBrightness = 'screen_brightness';
   static const _keyMirrorCapture = 'mirror_capture';
   static const _keyMembershipLevel = 'membership_level';
+  static const _keySelectedCustomPresetId = 'selected_custom_preset_id';
 
   late SharedPreferences _prefs;
 
@@ -21,10 +22,10 @@ class StateStore {
     _prefs = await SharedPreferences.getInstance();
   }
 
-  double get previewX => _prefs.getDouble(_keyPreviewX) ?? 16.0;
-  double get previewY => _prefs.getDouble(_keyPreviewY) ?? 80.0;
-  double get previewW => _prefs.getDouble(_keyPreviewW) ?? 120.0;
-  double get previewH => _prefs.getDouble(_keyPreviewH) ?? 160.0;
+  double get previewX => _prefs.getDouble(_keyPreviewX) ?? -1.0;
+  double get previewY => _prefs.getDouble(_keyPreviewY) ?? -1.0;
+  double get previewW => _prefs.getDouble(_keyPreviewW) ?? 160.0;
+  double get previewH => _prefs.getDouble(_keyPreviewH) ?? 285.0;
   int get selectedIndex => _prefs.getInt(_keySelectedIndex) ?? 0;
   double get hue => _prefs.getDouble(_keyHue) ?? 0.0;
   double get saturation => _prefs.getDouble(_keySaturation) ?? 1.0;
@@ -33,6 +34,8 @@ class StateStore {
   bool get mirrorCapture => (_prefs.getInt(_keyMirrorCapture) ?? 0) == 1;
   MembershipLevel get membershipLevel =>
       MembershipLevel.fromValue(_prefs.getInt(_keyMembershipLevel) ?? 0);
+  String? get selectedCustomPresetId =>
+      _prefs.getString(_keySelectedCustomPresetId);
 
   Future<void> savePreviewLayout(double x, double y, double w, double h) async {
     await _prefs.setDouble(_keyPreviewX, x);
@@ -61,5 +64,13 @@ class StateStore {
 
   Future<void> saveMembershipLevel(MembershipLevel level) async {
     await _prefs.setInt(_keyMembershipLevel, level.value);
+  }
+
+  Future<void> saveSelectedCustomPresetId(String? id) async {
+    if (id == null) {
+      await _prefs.remove(_keySelectedCustomPresetId);
+    } else {
+      await _prefs.setString(_keySelectedCustomPresetId, id);
+    }
   }
 }
