@@ -8,8 +8,6 @@
     <!-- Media (Android 13+) -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <!-- Screen brightness -->
-    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <!-- Internet for IAP -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Wakelock -->
