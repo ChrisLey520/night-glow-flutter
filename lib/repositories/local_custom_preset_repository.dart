@@ -13,10 +13,35 @@ class LocalCustomPresetRepository implements CustomPresetRepository {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_prefsKey);
     if (raw == null) return [];
+    final dir = await _dir();
     final list = jsonDecode(raw) as List<dynamic>;
-    return list
-        .map((e) => CustomImagePreset.fromJson(e as Map<String, dynamic>))
-        .toList();
+
+    bool needsMigration = false;
+    final presets = list.map((e) {
+      final map = e as Map<String, dynamic>;
+      String stored = map['localPath'] as String;
+
+      // Migrate old absolute paths → filename-only.
+      // Absolute paths break across app reinstalls because the
+      // app container UUID changes, making the path stale.
+      if (stored.contains('/')) {
+        stored = stored.split('/').last;
+        needsMigration = true;
+      }
+
+      return CustomImagePreset(
+        id: map['id'] as String,
+        name: map['name'] as String,
+        localPath: '${dir.path}/$stored',
+      );
+    }).toList();
+
+    if (needsMigration) {
+      // Persist filename-only form so the migration runs only once.
+      await _saveAll(presets, dir: dir);
+    }
+
+    return presets;
   }
 
   @override
@@ -27,14 +52,14 @@ class LocalCustomPresetRepository implements CustomPresetRepository {
     final id = CustomImagePreset.generateId();
     final dir = await _dir();
     final ext = sourceFile.path.split('.').last.toLowerCase();
-    final localPath = '${dir.path}/$id.$ext';
+    final filename = '$id.$ext';
+    final localPath = '${dir.path}/$filename';
 
-    // Copy into managed storage — sourceFile (temp) is left untouched.
     await sourceFile.copy(localPath);
 
     final preset = CustomImagePreset(id: id, name: name, localPath: localPath);
     final all = await loadAll();
-    await _saveAll([...all, preset]);
+    await _saveAll([...all, preset], dir: dir);
     return preset;
   }
 
@@ -44,11 +69,11 @@ class LocalCustomPresetRepository implements CustomPresetRepository {
     final preset = all.where((p) => p.id == id).firstOrNull;
     if (preset == null) return;
 
-    // Delete only the managed COPY. The original image is never touched.
     final file = File(preset.localPath);
     if (await file.exists()) await file.delete();
 
-    await _saveAll(all.where((p) => p.id != id).toList());
+    final dir = await _dir();
+    await _saveAll(all.where((p) => p.id != id).toList(), dir: dir);
   }
 
   Future<Directory> _dir() async {
@@ -58,11 +83,14 @@ class LocalCustomPresetRepository implements CustomPresetRepository {
     return dir;
   }
 
-  Future<void> _saveAll(List<CustomImagePreset> presets) async {
+  // Saves presets storing only the filename (not the full absolute path).
+  Future<void> _saveAll(List<CustomImagePreset> presets,
+      {required Directory dir}) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _prefsKey,
-      jsonEncode(presets.map((p) => p.toJson()).toList()),
-    );
+    final json = presets.map((p) {
+      final filename = p.localPath.split('/').last;
+      return {'id': p.id, 'name': p.name, 'localPath': filename};
+    }).toList();
+    await prefs.setString(_prefsKey, jsonEncode(json));
   }
 }
